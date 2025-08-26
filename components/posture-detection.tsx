@@ -946,46 +946,48 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   }
 
   return (
-    <div className="space-y-4">
-      {/* MediaPipe 상태 표시 */}
-      <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            {useRealDetection ? (
-              <Wifi className="w-4 h-4 text-green-600" />
-            ) : (
-              <WifiOff className="w-4 h-4 text-yellow-600" />
-            )}
-            <span className="text-sm font-medium">{useRealDetection ? "실제 포즈 감지 모드" : "시뮬레이션 모드"}</span>
+    <div className={`${isActive ? 'fixed inset-0 z-50 bg-black' : 'space-y-4'}`}>
+      {/* 비활성화 상태에서만 설정 표시 */}
+      {!isActive && (
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              {useRealDetection ? (
+                <Wifi className="w-4 h-4 text-green-600" />
+              ) : (
+                <WifiOff className="w-4 h-4 text-yellow-600" />
+              )}
+              <span className="text-sm font-medium">{useRealDetection ? "실제 포즈 감지 모드" : "시뮬레이션 모드"}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (useRealDetection) {
+                  fallbackToSimulation()
+                } else {
+                  loadMediaPipe()
+                }
+              }}
+              className="h-6 px-2 text-xs"
+            >
+              {useRealDetection ? "시뮬레이션으로" : "실제감지 시도"}
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (useRealDetection) {
-                fallbackToSimulation()
-              } else {
-                loadMediaPipe()
-              }
-            }}
-            className="h-6 px-2 text-xs"
-          >
-            {useRealDetection ? "시뮬레이션으로" : "실제감지 시도"}
-          </Button>
         </div>
-      </div>
+      )}
 
-      {/* 운동 진행 상황 */}
+      {/* 운동 진행 상황 - 전체화면에서는 상단 오버레이 */}
       {isActive && (
-        <div className="bg-white p-4 rounded-lg border">
+        <div className="absolute top-16 left-4 right-4 z-30 bg-black bg-opacity-60 backdrop-blur-sm p-4 rounded-lg border border-white/20">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">운동 진행률</span>
-            <span className="text-sm text-blue-600">
+            <span className="text-sm font-medium text-white">운동 진행률</span>
+            <span className="text-sm text-blue-300">
               {exerciseCount}/{requiredCount}회
             </span>
           </div>
           <Progress value={exerciseProgress} className="h-2 mb-2" />
-          <div className="flex items-center justify-between text-xs text-gray-500">
+          <div className="flex items-center justify-between text-xs text-gray-300">
             <span>목표: 20회 완료</span>
             <span>{Math.round(exerciseProgress)}%</span>
           </div>
@@ -1011,8 +1013,12 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         </div>
       </div>
 
-      {/* 카메라 화면 */}
-      <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden">
+      {/* 카메라 화면 - 전체화면 모드 */}
+      <div className={`relative bg-gray-900 overflow-hidden ${
+        isActive 
+          ? 'w-full h-full min-h-screen' 
+          : 'aspect-video rounded-lg'
+      }`}>
         <video
           ref={videoRef}
           className="absolute top-0 left-0 w-full h-full object-cover transform scale-x-[-1]"
@@ -1042,16 +1048,20 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           </div>
         </div>
 
-        {/* 랜드마크 토글 */}
-        <div className="absolute top-2 right-2 z-30">
+        {/* 랜드마크 토글 - 전체화면 대응 */}
+        <div className={`absolute z-30 ${
+          isActive ? 'top-6 right-4' : 'top-2 right-2'
+        }`}>
           <Button
             variant="ghost"
-            size="sm"
+            size={isActive ? "default" : "sm"}
             onClick={() => {
               console.log("Toggling landmarks:", !showLandmarks)
               setShowLandmarks(!showLandmarks)
             }}
-            className={`text-white hover:bg-opacity-70 h-8 px-2 ${
+            className={`text-white hover:bg-opacity-70 backdrop-blur-sm ${
+              isActive ? 'h-12 px-4' : 'h-8 px-2'
+            } ${
               showLandmarks 
                 ? "bg-green-600 bg-opacity-80" 
                 : "bg-black bg-opacity-50"
