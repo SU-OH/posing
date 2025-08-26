@@ -194,28 +194,40 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
       pose.onResults((results: any) => {
         try {
-          console.log("MediaPipe results received:", {
+          console.log("=== MediaPipe Results ===", {
+            timestamp: Date.now(),
             poseLandmarks: !!results.poseLandmarks,
-            landmarkCount: results.poseLandmarks?.length || 0
+            landmarkCount: results.poseLandmarks?.length || 0,
+            canvasRef: !!canvasRef.current,
+            videoRef: !!videoRef.current,
+            showLandmarks: showLandmarks
           })
           
           if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-            console.log("Drawing landmarks...", results.poseLandmarks.length)
+            console.log("✅ LANDMARKS DETECTED!", {
+              count: results.poseLandmarks.length,
+              firstLandmark: results.poseLandmarks[0],
+              showLandmarks: showLandmarks
+            })
+            
+            // 랜드마크가 있으면 그리기 시도
             drawResults(results)
             analyzePosture(results.poseLandmarks)
             setDetectedPoses(1)
             setError(null)
+            
             if (feedbackMessage === "사람이 감지되지 않습니다. 카메라 앞으로 와주세요") {
-              setFeedbackMessage("사용자가 감지되었습니다!")
+              setFeedbackMessage("✅ 사용자가 감지되었습니다!")
             }
           } else {
+            console.log("⚠️ No landmarks detected")
             setDetectedPoses(0)
             if (feedbackMessage !== "사람이 감지되지 않습니다. 카메라 앞으로 와주세요") {
               setFeedbackMessage("사람이 감지되지 않습니다. 카메라 앞으로 와주세요")
             }
           }
         } catch (err) {
-          console.error("Results processing error:", err)
+          console.error("❌ Results processing error:", err)
           setFeedbackMessage("포즈 분석 중 오류가 발생했습니다")
         }
       })
@@ -251,78 +263,67 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     setFeedbackMessage("시뮬레이션 모드로 실행됩니다")
   }
 
-  // 결과 그리기
+  // 결과 그리기 - 강화된 디버깅
   const drawResults = (results: any) => {
+    console.log("🎨 drawResults 호출", {
+      hasCanvas: !!canvasRef.current,
+      hasVideo: !!videoRef.current,
+      showLandmarks: showLandmarks,
+      landmarksCount: results.poseLandmarks?.length || 0
+    })
+
     if (!canvasRef.current || !videoRef.current) {
-      console.log("Canvas or video ref not available")
+      console.log("❌ Canvas or video ref not available")
       return
     }
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
     if (!ctx) {
-      console.log("Canvas context not available")
+      console.log("❌ Canvas context not available")
       return
     }
 
     const videoWidth = videoRef.current.videoWidth
     const videoHeight = videoRef.current.videoHeight
     
+    console.log("📹 Video dimensions:", { videoWidth, videoHeight })
+    
     if (videoWidth === 0 || videoHeight === 0) {
-      console.log("Video dimensions not ready:", { videoWidth, videoHeight })
+      console.log("⚠️ Video dimensions not ready")
       return
     }
 
     // 캔버스 크기 설정
+    const oldWidth = canvas.width
+    const oldHeight = canvas.height
     canvas.width = videoWidth
     canvas.height = videoHeight
+    
+    if (oldWidth !== videoWidth || oldHeight !== videoHeight) {
+      console.log("🔄 Canvas resized:", { from: `${oldWidth}x${oldHeight}`, to: `${videoWidth}x${videoHeight}` })
+    }
 
     // 캔버스 초기화
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.save()
 
+    // 테스트를 위한 배경 색상
+    ctx.fillStyle = "rgba(255, 0, 0, 0.1)"
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    console.log("🟥 배경 색상 테스트 그리기 완료")
+
     if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-      console.log(`Drawing ${results.poseLandmarks.length} landmarks`)
+      console.log(`🔴 ${results.poseLandmarks.length}개 랜드마크 그리기 시작`)
       
       if (showLandmarks) {
-        // 스켈레톤 연결선 그리기
-        if (window.drawConnectors && window.POSE_CONNECTIONS) {
-          try {
-            window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, {
-              color: "#00FF41",
-              lineWidth: 4,
-            })
-            console.log("Connectors drawn successfully")
-          } catch (err) {
-            console.error("Error drawing connectors:", err)
-          }
-        } else {
-          console.log("drawConnectors or POSE_CONNECTIONS not available")
-        }
-
-        // 랜드마크 포인트 그리기
-        if (window.drawLandmarks) {
-          try {
-            window.drawLandmarks(ctx, results.poseLandmarks, {
-              color: "#FF0000",
-              lineWidth: 2,
-              radius: (data: any) => {
-                // 중요한 포인트는 더 크게
-                const keyPoints = [0, 11, 12, 13, 14, 15, 16] // 코, 어깨, 팔꿈치, 손목
-                return keyPoints.includes(data.index) ? 6 : 3
-              },
-              fillColor: "#FF0000",
-            })
-            console.log("Landmarks drawn successfully")
-          } catch (err) {
-            console.error("Error drawing landmarks:", err)
-            // 폴백: 수동으로 랜드마크 그리기
-            drawLandmarksManually(ctx, results.poseLandmarks)
-          }
-        } else {
-          console.log("drawLandmarks not available, drawing manually")
-          drawLandmarksManually(ctx, results.poseLandmarks)
-        }
+        console.log("✅ 랜드마크 표시 모드 - 그리기 시작")
+        drawPoseConnections(ctx, results.poseLandmarks)
+        drawPoseLandmarks(ctx, results.poseLandmarks)
+        console.log("✅ 랜드마크 그리기 완료")
+      } else {
+        console.log("🙅 랜드마크 비표시 모드")
       }
 
       // 배경 피드백 색상
@@ -333,38 +334,109 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           ctx.fillRect(0, 0, canvas.width, canvas.height)
         }
       } catch (err) {
-        console.error("Error in pose validation:", err)
+        console.error("❌ Error in pose validation:", err)
       }
     } else {
-      console.log("No pose landmarks to draw")
+      console.log("⚠️ No pose landmarks to draw")
     }
 
     ctx.restore()
+    console.log("✅ drawResults 완료")
   }
 
-  // 수동 랜드마크 그리기 함수
-  const drawLandmarksManually = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
+  // 포즈 연결선 그리기
+  const drawPoseConnections = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
     if (!landmarks || landmarks.length === 0) return
     
-    console.log("Drawing landmarks manually")
+    console.log("Drawing pose connections manually")
+    
+    // MediaPipe 포즈 연결선 정의
+    const connections = [
+      // 얼굴
+      [0, 1], [1, 2], [2, 3], [3, 7], // 코 -> 오른쪽 얼굴
+      [0, 4], [4, 5], [5, 6], [6, 8], // 코 -> 왼쪽 얼굴
+      
+      // 몸통
+      [9, 10], // 입
+      [11, 12], // 어깨 연결
+      [11, 23], [12, 24], // 어깨 -> 엉덩이
+      [23, 24], // 엉덩이 연결
+      
+      // 오른쪽 팔
+      [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
+      
+      // 왼쪽 팔
+      [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
+      
+      // 오른쪽 다리
+      [23, 25], [25, 27], [27, 29], [27, 31], [29, 31],
+      
+      // 왼쪽 다리
+      [24, 26], [26, 28], [28, 30], [28, 32], [30, 32]
+    ]
+    
+    ctx.strokeStyle = "#00FF41"
+    ctx.lineWidth = 3
+    
+    connections.forEach(([startIdx, endIdx]) => {
+      const startLandmark = landmarks[startIdx]
+      const endLandmark = landmarks[endIdx]
+      
+      if (startLandmark && endLandmark) {
+        // visibility 체크
+        const startVisible = !startLandmark.visibility || startLandmark.visibility > 0.3
+        const endVisible = !endLandmark.visibility || endLandmark.visibility > 0.3
+        
+        if (startVisible && endVisible) {
+          const startX = startLandmark.x * ctx.canvas.width
+          const startY = startLandmark.y * ctx.canvas.height
+          const endX = endLandmark.x * ctx.canvas.width
+          const endY = endLandmark.y * ctx.canvas.height
+          
+          ctx.beginPath()
+          ctx.moveTo(startX, startY)
+          ctx.lineTo(endX, endY)
+          ctx.stroke()
+        }
+      }
+    })
+  }
+
+  // 포즈 랜드마크 그리기
+  const drawPoseLandmarks = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
+    if (!landmarks || landmarks.length === 0) return
+    
+    console.log("Drawing pose landmarks manually")
     
     landmarks.forEach((landmark, index) => {
-      if (landmark.visibility && landmark.visibility < 0.5) return
+      // visibility 체크
+      if (landmark.visibility && landmark.visibility < 0.3) return
       
       const x = landmark.x * ctx.canvas.width
       const y = landmark.y * ctx.canvas.height
       
       // 중요한 포인트는 더 크게
-      const keyPoints = [0, 11, 12, 13, 14, 15, 16]
-      const radius = keyPoints.includes(index) ? 6 : 3
+      const keyPoints = [0, 11, 12, 13, 14, 15, 16, 23, 24] // 코, 어깨, 팔꿈치, 손목, 엉덩이
+      const radius = keyPoints.includes(index) ? 5 : 3
       
+      // 원 그리기
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, 2 * Math.PI)
       ctx.fillStyle = "#FF0000"
       ctx.fill()
+      
+      // 테두리
       ctx.strokeStyle = "#FFFFFF"
-      ctx.lineWidth = 1
+      ctx.lineWidth = 2
       ctx.stroke()
+      
+      // 중요한 포인트에 번호 표시 (디버깅용)
+      if (keyPoints.includes(index)) {
+        ctx.fillStyle = "#FFFFFF"
+        ctx.font = "10px Arial"
+        ctx.textAlign = "center"
+        ctx.fillText(index.toString(), x, y - radius - 2)
+      }
     })
   }
 
@@ -955,30 +1027,51 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           style={{
             backgroundColor: "transparent",
             transform: "scaleX(-1)",
-            zIndex: 10,
+            zIndex: 20,
+            mixBlendMode: "normal",
+            opacity: showLandmarks ? 1 : 0,
           }}
         />
 
         {/* 상태 오버레이 */}
-        <div className="absolute top-2 left-2">
+        <div className="absolute top-2 left-2 z-30">
           <div className={`px-2 py-1 rounded text-xs text-white ${getStatusColor()} bg-opacity-80`}>
             {getStatusText()}
             {isActive && fps > 0 && ` | ${fps}fps`}
-            {detectedPoses > 0 && ` | ${detectedPoses}명`}
+            {detectedPoses > 0 && ` | 인식됨`}
           </div>
         </div>
 
         {/* 랜드마크 토글 */}
-        <div className="absolute top-2 right-2">
+        <div className="absolute top-2 right-2 z-30">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowLandmarks(!showLandmarks)}
-            className="bg-black bg-opacity-50 text-white hover:bg-opacity-70 h-8 px-2"
+            onClick={() => {
+              console.log("Toggling landmarks:", !showLandmarks)
+              setShowLandmarks(!showLandmarks)
+            }}
+            className={`text-white hover:bg-opacity-70 h-8 px-2 ${
+              showLandmarks 
+                ? "bg-green-600 bg-opacity-80" 
+                : "bg-black bg-opacity-50"
+            }`}
           >
-            {showLandmarks ? "랜드마크 표시" : "랜드마크 숨기기"}
+            {showLandmarks ? "랜드마크 ON" : "랜드마크 OFF"}
           </Button>
         </div>
+
+        {/* 디버깅 정보 */}
+        {isActive && (
+          <div className="absolute bottom-16 right-2 z-30">
+            <div className="bg-black bg-opacity-70 text-white text-xs p-2 rounded">
+              <div>FPS: {fps}</div>
+              <div>인식: {detectedPoses > 0 ? '성공' : '실패'}</div>
+              <div>랜드마크: {showLandmarks ? 'ON' : 'OFF'}</div>
+              <div>MediaPipe: {mediaPipeStatus}</div>
+            </div>
+          </div>
+        )}
 
         {/* 실시간 피드백 */}
         <div className="absolute bottom-4 left-4 right-4">
