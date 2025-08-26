@@ -979,39 +979,35 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
       {/* 운동 진행 상황 - 전체화면에서는 상단 오버레이 */}
       {isActive && (
-        <div className="absolute top-16 left-4 right-4 z-30 bg-black bg-opacity-60 backdrop-blur-sm p-4 rounded-lg border border-white/20">
+        <div className="absolute top-4 left-4 right-4 z-40 bg-black bg-opacity-70 backdrop-blur-sm p-3 rounded-lg border border-white/30 safe-top">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-white">운동 진행률</span>
-            <span className="text-sm text-blue-300">
+            <span className="text-sm font-semibold text-white">운동 진행률</span>
+            <span className="text-sm text-blue-400 font-medium">
               {exerciseCount}/{requiredCount}회
             </span>
           </div>
-          <Progress value={exerciseProgress} className="h-2 mb-2" />
+          <Progress value={exerciseProgress} className="h-3 mb-2" />
           <div className="flex items-center justify-between text-xs text-gray-300">
             <span>목표: 20회 완료</span>
-            <span>{Math.round(exerciseProgress)}%</span>
+            <span className="font-medium">{Math.round(exerciseProgress)}%</span>
           </div>
         </div>
       )}
 
-      {/* 상태 표시 */}
-      <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-        <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${getStatusColor()} ${isActive ? "animate-pulse" : ""}`}></div>
-          <span className="text-sm font-medium text-gray-700">상태: {getStatusText()}</span>
-          {detectedPoses > 0 && (
-            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-              {useRealDetection ? `${detectedPoses}명 감지` : "시뮬레이션 활성"}
-            </span>
-          )}
+      {/* 상태 표시 - 비활성화 상태에서만 */}
+      {!isActive && (
+        <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${getStatusColor()}`}></div>
+            <span className="text-sm font-medium text-gray-700">상태: {getStatusText()}</span>
+          </div>
+          <div className="flex items-center space-x-4 text-xs text-gray-500">
+            <Button variant="ghost" size="sm" onClick={() => setShowLandmarks(!showLandmarks)} className="h-6 px-2">
+              {showLandmarks ? "랜드마크 표시" : "랜드마크 숨기기"}
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center space-x-4 text-xs text-gray-500">
-          {isActive && <span>FPS: {fps}</span>}
-          <Button variant="ghost" size="sm" onClick={() => setShowLandmarks(!showLandmarks)} className="h-6 px-2">
-            {showLandmarks ? "랜드마크 표시" : "랜드마크 숨기기"}
-          </Button>
-        </div>
-      </div>
+      )}
 
       {/* 카메라 화면 - 전체화면 모드 */}
       <div className={`relative bg-gray-900 overflow-hidden ${
@@ -1073,12 +1069,14 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
         {/* 디버깅 정보 */}
         {isActive && (
-          <div className="absolute bottom-16 right-2 z-30">
-            <div className="bg-black bg-opacity-70 text-white text-xs p-2 rounded">
-              <div>FPS: {fps}</div>
-              <div>인식: {detectedPoses > 0 ? '성공' : '실패'}</div>
-              <div>랜드마크: {showLandmarks ? 'ON' : 'OFF'}</div>
-              <div>MediaPipe: {mediaPipeStatus}</div>
+          <div className="absolute bottom-36 right-4 z-30">
+            <div className="bg-black bg-opacity-80 text-white text-xs p-3 rounded-lg backdrop-blur-sm border border-white/20">
+              <div className="font-mono space-y-1">
+                <div>FPS: <span className="text-green-400">{fps}</span></div>
+                <div>인식: <span className={detectedPoses > 0 ? 'text-green-400' : 'text-red-400'}>{detectedPoses > 0 ? '성공' : '실패'}</span></div>
+                <div>랜드마크: <span className={showLandmarks ? 'text-blue-400' : 'text-gray-400'}>{showLandmarks ? 'ON' : 'OFF'}</span></div>
+                <div>MediaPipe: <span className="text-yellow-400">{mediaPipeStatus}</span></div>
+              </div>
             </div>
           </div>
         )}
@@ -1100,20 +1098,24 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
         {/* 방향 인디케이터 */}
         {isActive && (
-          <div className="absolute top-12 left-4 right-4">
-            <div className="flex justify-center space-x-4">
+          <div className="absolute top-28 left-1/2 transform -translate-x-1/2 z-30">
+            <div className="flex space-x-8 mb-2">
               <div
-                className={`w-4 h-4 rounded-full ${currentDirection === "left" ? "bg-yellow-400 animate-pulse" : "bg-gray-400"}`}
+                className={`w-8 h-8 rounded-full border-3 ${currentDirection === "left" ? "border-yellow-400 bg-yellow-400 animate-pulse shadow-lg" : "border-white/50 bg-gray-600/50"} transition-all duration-300`}
               ></div>
               <div
-                className={`w-4 h-4 rounded-full ${currentDirection === "center" ? "bg-green-400 animate-pulse" : "bg-gray-400"}`}
+                className={`w-8 h-8 rounded-full border-3 ${currentDirection === "center" ? "border-green-400 bg-green-400 animate-pulse shadow-lg" : "border-white/50 bg-gray-600/50"} transition-all duration-300`}
               ></div>
               <div
-                className={`w-4 h-4 rounded-full ${currentDirection === "right" ? "bg-yellow-400 animate-pulse" : "bg-gray-400"}`}
+                className={`w-8 h-8 rounded-full border-3 ${currentDirection === "right" ? "border-yellow-400 bg-yellow-400 animate-pulse shadow-lg" : "border-white/50 bg-gray-600/50"} transition-all duration-300`}
               ></div>
             </div>
-            <div className="text-center text-white text-sm mt-1 bg-black bg-opacity-50 rounded px-2 py-1">
-              ← 왼쪽 | 중앙 | 오른쪽 →
+            <div className="text-center text-white text-sm bg-black bg-opacity-70 rounded-lg px-4 py-2 backdrop-blur-sm border border-white/30">
+              <div className="flex justify-between text-xs opacity-80">
+                <span>←왼쪽</span>
+                <span>중앙</span>
+                <span>오른쪽→</span>
+              </div>
             </div>
           </div>
         )}
@@ -1124,6 +1126,32 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
             <div className="text-center text-white">
               <CheckCircle className="w-16 h-16 mx-auto mb-2 animate-bounce" />
               <p className="text-xl font-bold">운동 완료!</p>
+            </div>
+          </div>
+        )}
+
+        {/* 전체화면 모드 컨트롤 버튼 */}
+        {isActive && (
+          <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-30">
+            <div className="flex space-x-4">
+              <Button 
+                onClick={stopCamera} 
+                variant="outline" 
+                size="lg"
+                className="bg-red-600 bg-opacity-80 text-white border-red-400 hover:bg-red-700 backdrop-blur-sm"
+              >
+                <CameraOff className="w-5 h-5 mr-2" />
+                종료
+              </Button>
+              <Button 
+                onClick={resetExercise} 
+                variant="outline" 
+                size="lg"
+                className="bg-blue-600 bg-opacity-80 text-white border-blue-400 hover:bg-blue-700 backdrop-blur-sm"
+              >
+                <RotateCcw className="w-5 h-5 mr-2" />
+                재시작
+              </Button>
             </div>
           </div>
         )}
@@ -1139,38 +1167,29 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         )}
       </div>
 
-      {/* 컨트롤 버튼 */}
-      <div className="flex space-x-3">
-        {!isActive ? (
+      {/* 컨트롤 버튼 - 비활성화 상태에서만 */}
+      {!isActive && (
+        <div className="flex space-x-3">
           <Button onClick={startCamera} className="flex-1" disabled={isLoading}>
             <Camera className="w-4 h-4 mr-2" />
             {isLoading ? "시작 중..." : "카메라 시작"}
           </Button>
-        ) : (
-          <>
-            <Button onClick={stopCamera} variant="outline" className="flex-1 bg-transparent">
-              <CameraOff className="w-4 h-4 mr-2" />
-              카메라 중지
-            </Button>
-            <Button onClick={resetExercise} variant="outline" className="flex-1 bg-transparent">
-              <RotateCcw className="w-4 h-4 mr-2" />
-              다시 시작
-            </Button>
-          </>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* 사용 안내 */}
-      <div className="text-sm text-gray-600 space-y-1">
-        <p>• 편안하게 누워서 목에 수숨슬립을 받치세요</p>
-        <p>• 목을 좌우로 천천히 20회 돌려주세요</p>
-        <p>• 들숨에 좌우로, 날숨에 중앙으로 돌아오세요</p>
-        {useRealDetection ? (
-          <p className="text-green-600">• ✅ 실제 MediaPipe 포즈 감지가 활성화되었습니다!</p>
-        ) : (
-          <p className="text-yellow-600">• ⚠️ 현재 시뮬레이션 모드로 실행 중입니다</p>
-        )}
-      </div>
+      {/* 사용 안내 - 비활성화 상태에서만 */}
+      {!isActive && (
+        <div className="text-sm text-gray-600 space-y-1">
+          <p>• 편안하게 누워서 목에 수숨슬립을 받치세요</p>
+          <p>• 목을 좌우로 천천히 20회 돌려주세요</p>
+          <p>• 들숨에 좌우로, 날숨에 중앙으로 돌아오세요</p>
+          {useRealDetection ? (
+            <p className="text-green-600">• ✅ 실제 MediaPipe 포즈 감지가 활성화되었습니다!</p>
+          ) : (
+            <p className="text-yellow-600">• ⚠️ 현재 시뮬레이션 모드로 실행 중입니다</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
