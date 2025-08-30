@@ -55,6 +55,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const fpsCounterRef = useRef(0)
   const lastFpsTimeRef = useRef(Date.now())
   const loadAttemptRef = useRef(0)
+  const cameraStartingRef = useRef(false) // 카메라 시작 중복 방지
 
   useEffect(() => {
     // 개발/테스트 모드에서는 바로 시뮬레이션으로 시작할 수 있도록
@@ -626,21 +627,37 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     }
   }
 
-  // 카메라 시작
+  // 카메라 시작 (중복 호출 방지)
   const startCamera = async () => {
+    // 중복 실행 방지 - ref를 사용해서 즉시 체크
+    if (cameraStartingRef.current || isLoading || isActive) {
+      console.warn("⚠️ 카메라가 이미 실행 중입니다. 중복 호출을 방지합니다.", {
+        cameraStarting: cameraStartingRef.current,
+        isLoading,
+        isActive
+      })
+      return
+    }
+
+    cameraStartingRef.current = true // 시작 플래그 설정
+
     try {
+      console.log("📷 카메라 시작 요청...")
       setIsLoading(true)
       setError(null)
 
+      // 기존 스트림 정리
       if (stream) {
+        console.log("🛑 기존 스트림 중지...")
         stream.getTracks().forEach((track) => track.stop())
+        setStream(null)
       }
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("이 브라우저는 카메라를 지원하지 않습니다")
       }
 
-      console.log("📷 카메라 접근 요청...")
+      console.log("📷 카메라 권한 요청 중...")
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -652,7 +669,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         audio: false,
       })
 
-      console.log("✅ 카메라 스트림 획득:", mediaStream.getVideoTracks()[0].getSettings())
+      console.log("✅ 카메라 스트림 성공 획득:", mediaStream.getVideoTracks()[0].getSettings())
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream
@@ -682,28 +699,38 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           video.play().catch(reject)
         })
 
+        console.log("🎬 비디오 스트림 준비 완료")
         setIsActive(true)
         setFeedbackMessage("📹 카메라가 활성화되었습니다! 운동을 시작하세요")
 
-        // MediaPipe 또는 시뮬레이션 시작
-        if (useRealDetection && poseDetector && mediaPipeStatus === "ready") {
-          console.log("🎯 MediaPipe 포즈 감지 시작...")
-          setMediaPipeStatus("running")
-          setTimeout(() => {
-            if (isActive && videoRef.current && videoRef.current.readyState >= 2) {
-              startPoseDetection()
-            }
-          }, 1000)
-        } else {
-          console.log("🎭 시뮬레이션 모드 시작...")
-          startSimulation()
-        }
+        // MediaPipe 또는 시뮬레이션 시작 (상태 변경 후 지연)
+        setTimeout(() => {
+          if (useRealDetection && poseDetector && mediaPipeStatus === "ready") {
+            console.log("🎯 MediaPipe 포즈 감지 시작...")
+            setMediaPipeStatus("running")
+            // 비디오가 완전히 준비될 때까지 추가 대기
+            setTimeout(() => {
+              if (videoRef.current && videoRef.current.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+                console.log("✅ 비디오 준비 완료, 포즈 감지 시작")
+                startPoseDetection()
+              } else {
+                console.warn("⚠️ 비디오가 아직 준비되지 않음, 시뮬레이션 모드로 전환")
+                startSimulation()
+              }
+            }, 1500) // 비디오 준비 대기 시간 증가
+          } else {
+            console.log("🎭 시뮬레이션 모드 시작...")
+            startSimulation()
+          }
+        }, 500) // 상태 변경 반영 대기
       }
 
       setIsLoading(false)
+      cameraStartingRef.current = false // 성공 시 플래그 해제
     } catch (err: any) {
       console.error("💥 카메라 시작 실패:", err)
       setIsLoading(false)
+      cameraStartingRef.current = false // 에러 시 플래그 해제
 
       let errorMessage = "카메라에 접근할 수 없습니다."
 
@@ -809,32 +836,47 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
   // 카메라 중지
   const stopCamera = () => {
+    console.log("🛑 카메라 중지 요청...")
+    
+    // 중복 방지 플래그도 초기화
+    cameraStartingRef.current = false
     setIsActive(false)
     setMediaPipeStatus("ready")
 
     if (stream) {
-      stream.getTracks().forEach((track) => track.stop())
+      console.log("🎬 스트림 트랙 중지...")
+      stream.getTracks().forEach((track) => {
+        track.stop()
+        console.log(`📹 트랙 중지: ${track.kind} (${track.label})`)
+      })
       setStream(null)
     }
 
     if (videoRef.current) {
+      console.log("📺 비디오 엘리먼트 정리...")
       videoRef.current.srcObject = null
     }
 
     if (simulationIntervalRef.current) {
+      console.log("🎭 시뮬레이션 중지...")
       clearInterval(simulationIntervalRef.current)
       simulationIntervalRef.current = null
     }
 
     if (animationFrameRef.current) {
+      console.log("🎯 포즈 감지 중지...")
       cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = undefined
     }
 
+    // 상태 초기화
     setExerciseCount(0)
     setExerciseProgress(0)
     setFeedbackMessage("카메라가 중지되었습니다")
     setCurrentDirection("center")
     setLastDirection("center")
+    
+    console.log("✅ 카메라 완전히 중지됨")
   }
 
   // 운동 재시작
