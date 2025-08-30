@@ -57,18 +57,28 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const loadAttemptRef = useRef(0)
 
   useEffect(() => {
-    loadMediaPipe()
+    // 개발/테스트 모드에서는 바로 시뮬레이션으로 시작할 수 있도록
+    const forceSimulation = new URLSearchParams(window.location.search).get('simulation') === 'true'
+    
+    if (forceSimulation) {
+      console.log("🎭 URL 파라미터로 시뮬레이션 모드 강제 활성화")
+      fallbackToSimulation()
+    } else {
+      loadMediaPipe()
+    }
+    
     return cleanup
   }, [])
 
   // 개선된 MediaPipe 로딩 시스템
   const loadMediaPipe = async () => {
-    const maxAttempts = 2
+    const maxAttempts = 3 // 시도 횟수 증가
     loadAttemptRef.current++
     
     try {
       setMediaPipeStatus("loading")
       setFeedbackMessage(`🚀 MediaPipe 라이브러리 로딩 중... (${loadAttemptRef.current}/${maxAttempts})`)
+      console.log("🔄 MediaPipe 로딩 시작", { attempt: loadAttemptRef.current, maxAttempts })
 
       // 이미 로드되었는지 확인
       if (window.Pose && window.drawConnectors && window.drawLandmarks) {
@@ -78,56 +88,100 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       }
 
       // 더 안정적인 스크립트 로드
+      console.log("📦 스크립트 로딩 시작...")
       await loadMediaPipeScripts()
+      
+      console.log("⏳ 객체 초기화 대기...")
       await waitForMediaPipeObjects()
+      
+      console.log("🔧 MediaPipe 초기화...")
       await initializeMediaPipe()
 
     } catch (err: any) {
       console.error(`💥 MediaPipe 로드 시도 ${loadAttemptRef.current} 실패:`, err)
+      console.error("에러 상세:", {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      })
       
       if (loadAttemptRef.current < maxAttempts) {
-        setFeedbackMessage(`재시도 중... (${loadAttemptRef.current + 1}/${maxAttempts})`)
-        setTimeout(() => loadMediaPipe(), 2000)
+        setFeedbackMessage(`❌ 로딩 실패. 재시도 중... (${loadAttemptRef.current + 1}/${maxAttempts})`)
+        setTimeout(() => loadMediaPipe(), 3000) // 대기 시간 증가
       } else {
-        setError(`MediaPipe 로드 실패: ${err.message}`)
+        console.log("🔴 최대 재시도 횟수 초과, 시뮬레이션 모드로 전환")
+        setError(`MediaPipe 로드 실패 (${maxAttempts}회 시도): ${err.message}`)
         setMediaPipeStatus("error")
         fallbackToSimulation()
       }
     }
   }
 
-  // 스크립트 로딩 함수 개선
+  // 스크립트 로딩 함수 개선 (fallback CDN 추가)
   const loadMediaPipeScripts = async () => {
     const scripts = [
       {
-        url: "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js",
+        name: "drawing_utils",
+        urls: [
+          "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js",
+          "https://unpkg.com/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js"
+        ],
         check: () => window.drawConnectors && window.drawLandmarks
       },
       {
-        url: "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js", 
+        name: "pose",
+        urls: [
+          "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js",
+          "https://unpkg.com/@mediapipe/pose@0.5.1675469404/pose.js"
+        ],
         check: () => window.Pose && (window.POSE_CONNECTIONS || window.POSE_LANDMARKS)
       }
     ]
 
     for (const script of scripts) {
       if (script.check()) {
-        console.log(`✅ 스크립트 이미 로드됨: ${script.url}`)
+        console.log(`✅ ${script.name} 스크립트 이미 로드됨`)
         continue
       }
 
-      console.log(`📦 로딩 중: ${script.url}`)
-      await loadScript(script.url)
+      console.log(`📦 ${script.name} 로딩 시도...`)
+      
+      let loaded = false
+      for (const url of script.urls) {
+        try {
+          console.log(`🔗 시도 중: ${url}`)
+          await loadScript(url)
+          console.log(`✅ ${script.name} 로드 성공: ${url}`)
+          loaded = true
+          break
+        } catch (err) {
+          console.warn(`❌ ${script.name} 로드 실패: ${url}`, err)
+          continue
+        }
+      }
+      
+      if (!loaded) {
+        throw new Error(`${script.name} 스크립트를 모든 CDN에서 로드할 수 없습니다`)
+      }
+      
       await new Promise(resolve => setTimeout(resolve, 1000)) // 로드 후 대기
     }
   }
 
-  // 스크립트 로드 헬퍼
+  // 스크립트 로드 헬퍼 (네트워크 체크 강화)
   const loadScript = (src: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       // 기존 스크립트 확인
       const existing = document.querySelector(`script[src="${src}"]`)
       if (existing) {
+        console.log(`♻️ 기존 스크립트 재사용: ${src}`)
         resolve()
+        return
+      }
+
+      // 네트워크 연결 체크
+      if (!navigator.onLine) {
+        reject(new Error("인터넷 연결이 없습니다"))
         return
       }
 
@@ -145,15 +199,21 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       const onLoad = () => {
         cleanup()
         console.log(`✅ 스크립트 로드 성공: ${src}`)
-        setTimeout(resolve, 500) // 초기화 시간 확보
+        // 초기화 시간을 더 길게 확보
+        setTimeout(resolve, 800)
       }
 
-      const onError = () => {
+      const onError = (event: any) => {
         cleanup()
         if (document.head.contains(script)) {
           document.head.removeChild(script)
         }
-        reject(new Error(`스크립트 로드 실패: ${src}`))
+        console.error(`❌ 스크립트 로드 에러:`, {
+          url: src,
+          error: event,
+          networkStatus: navigator.onLine ? 'online' : 'offline'
+        })
+        reject(new Error(`스크립트 로드 실패: ${src} (네트워크: ${navigator.onLine ? 'OK' : 'OFFLINE'})`))
       }
 
       const timeout = setTimeout(() => {
@@ -161,11 +221,18 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         if (document.head.contains(script)) {
           document.head.removeChild(script)
         }
-        reject(new Error(`스크립트 로드 타임아웃: ${src}`))
-      }, 20000) // 20초 타임아웃
+        console.error(`⏰ 스크립트 로드 타임아웃:`, {
+          url: src,
+          timeout: '25초',
+          networkStatus: navigator.onLine ? 'online' : 'offline'
+        })
+        reject(new Error(`스크립트 로드 타임아웃 (25초): ${src}`))
+      }, 25000) // 25초로 타임아웃 증가
 
       script.addEventListener('load', onLoad)
       script.addEventListener('error', onError)
+      
+      console.log(`⬇️ 스크립트 로드 시작: ${src}`)
       document.head.appendChild(script)
     })
   }
