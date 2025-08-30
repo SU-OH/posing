@@ -1180,9 +1180,11 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       {/* 사용 안내 - 비활성화 상태에서만 */}
       {!isActive && (
         <div className="text-sm text-gray-600 space-y-1">
-          <p>• 편안하게 누워서 목에 수숨슬립을 받치세요</p>
-          <p>• 목을 좌우로 천천히 20회 돌려주세요</p>
-          <p>• 들숨에 좌우로, 날숨에 중앙으로 돌아오세요</p>
+          <p>• 📱 <strong>가로 촬영:</strong> 휴대폰을 가로로 놓고 촬영하세요</p>
+          <p>• 📐 <strong>촬영 각도:</strong> 옆에서 45도 비스듬히 촬영하세요</p>
+          <p>• 🛏️ <strong>누운 자세:</strong> 편안하게 누워서 수숨슬립을 목 아래 받치세요</p>
+          <p>• 🔄 <strong>운동 방법:</strong> 목을 좌우로 천천히 20회 돌려주세요</p>
+          <p>• 🫁 <strong>호흡:</strong> 들숨에 좌우로, 날숨에 중앙으로 돌아오세요</p>
           {useRealDetection ? (
             <p className="text-green-600">• ✅ 실제 MediaPipe 포즈 감지가 활성화되었습니다!</p>
           ) : (
