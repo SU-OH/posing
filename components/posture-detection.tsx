@@ -11,13 +11,14 @@ interface PostureDetectionProps {
   stepId: number
 }
 
-// MediaPipe 타입 정의
+// 최신 MediaPipe 타입 정의
 declare global {
   interface Window {
     Pose: any
     drawConnectors: any
     drawLandmarks: any
     POSE_CONNECTIONS: any
+    POSE_LANDMARKS: any
     Camera: any
   }
 }
@@ -38,7 +39,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   // 운동 상태
   const [exerciseCount, setExerciseCount] = useState(0)
   const [exerciseProgress, setExerciseProgress] = useState(0)
-  const [feedbackMessage, setFeedbackMessage] = useState("MediaPipe 로딩 중...")
+  const [feedbackMessage, setFeedbackMessage] = useState("MediaPipe 로딩 준비 중...")
   const requiredCount = 20
 
   // 포즈 감지 상태
@@ -53,280 +54,271 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const animationFrameRef = useRef<number>()
   const fpsCounterRef = useRef(0)
   const lastFpsTimeRef = useRef(Date.now())
+  const loadAttemptRef = useRef(0)
 
   useEffect(() => {
     loadMediaPipe()
     return cleanup
   }, [])
 
-  // MediaPipe 로드
+  // 개선된 MediaPipe 로딩 시스템
   const loadMediaPipe = async () => {
+    const maxAttempts = 2
+    loadAttemptRef.current++
+    
     try {
       setMediaPipeStatus("loading")
-      setFeedbackMessage("MediaPipe 라이브러리 로딩 중...")
+      setFeedbackMessage(`🚀 MediaPipe 라이브러리 로딩 중... (${loadAttemptRef.current}/${maxAttempts})`)
 
       // 이미 로드되었는지 확인
       if (window.Pose && window.drawConnectors && window.drawLandmarks) {
-        console.log("MediaPipe already loaded")
-        initializeMediaPipe()
+        console.log("✅ MediaPipe가 이미 로드됨")
+        await initializeMediaPipe()
         return
       }
 
-      // 스크립트 로드 함수 개선
-      const loadScript = (src: string): Promise<void> => {
-        return new Promise((resolve, reject) => {
-          // 이미 로드된 스크립트 확인
-          const existingScript = document.querySelector(`script[src="${src}"]`)
-          if (existingScript) {
-            resolve()
-            return
-          }
-
-          const script = document.createElement("script")
-          script.src = src
-          script.async = true
-          script.crossOrigin = "anonymous"
-
-          const timeout = setTimeout(() => {
-            if (document.head.contains(script)) {
-              document.head.removeChild(script)
-            }
-            reject(new Error(`Script loading timeout: ${src}`))
-          }, 30000) // 30초로 증가
-
-          script.onload = () => {
-            clearTimeout(timeout)
-            console.log(`Successfully loaded: ${src}`)
-            // 스크립트 로드 후 잠시 대기하여 객체 초기화 시간 확보
-            setTimeout(resolve, 300)
-          }
-
-          script.onerror = () => {
-            clearTimeout(timeout)
-            if (document.head.contains(script)) {
-              document.head.removeChild(script)
-            }
-            reject(new Error(`Failed to load ${src}`))
-          }
-
-          document.head.appendChild(script)
-        })
-      }
-
-      // MediaPipe 스크립트들 최적화된 순서로 로드
-      const scripts = [
-        "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js",
-        "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js",
-      ]
-
-      console.log("Loading MediaPipe scripts...")
-      for (const script of scripts) {
-        console.log(`Loading: ${script}`)
-        await loadScript(script)
-        // 각 스크립트 로드 후 대기 시간 증가
-        await new Promise((resolve) => setTimeout(resolve, 800))
-      }
-
-      // 로드 완료 후 객체 확인
-      let retries = 0
-      const maxRetries = 15
-
-      while (retries < maxRetries) {
-        if (window.Pose && window.drawConnectors && window.drawLandmarks && window.POSE_CONNECTIONS) {
-          console.log("All MediaPipe objects available")
-          break
-        }
-
-        console.log(`Waiting for MediaPipe objects... (${retries + 1}/${maxRetries})`)
-        console.log(`Available objects: Pose=${!!window.Pose}, drawConnectors=${!!window.drawConnectors}, drawLandmarks=${!!window.drawLandmarks}, POSE_CONNECTIONS=${!!window.POSE_CONNECTIONS}`)
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-        retries++
-      }
-
-      if (retries >= maxRetries) {
-        throw new Error("MediaPipe objects not available after loading")
-      }
-
+      // 더 안정적인 스크립트 로드
+      await loadMediaPipeScripts()
+      await waitForMediaPipeObjects()
       await initializeMediaPipe()
-    } catch (err) {
-      console.error("MediaPipe 로드 실패:", err)
-      setError(`MediaPipe 로드에 실패했습니다: ${err.message}`)
-      setMediaPipeStatus("error")
-      fallbackToSimulation()
+
+    } catch (err: any) {
+      console.error(`💥 MediaPipe 로드 시도 ${loadAttemptRef.current} 실패:`, err)
+      
+      if (loadAttemptRef.current < maxAttempts) {
+        setFeedbackMessage(`재시도 중... (${loadAttemptRef.current + 1}/${maxAttempts})`)
+        setTimeout(() => loadMediaPipe(), 2000)
+      } else {
+        setError(`MediaPipe 로드 실패: ${err.message}`)
+        setMediaPipeStatus("error")
+        fallbackToSimulation()
+      }
     }
   }
 
-  // MediaPipe 초기화
+  // 스크립트 로딩 함수 개선
+  const loadMediaPipeScripts = async () => {
+    const scripts = [
+      {
+        url: "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js",
+        check: () => window.drawConnectors && window.drawLandmarks
+      },
+      {
+        url: "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js", 
+        check: () => window.Pose && (window.POSE_CONNECTIONS || window.POSE_LANDMARKS)
+      }
+    ]
+
+    for (const script of scripts) {
+      if (script.check()) {
+        console.log(`✅ 스크립트 이미 로드됨: ${script.url}`)
+        continue
+      }
+
+      console.log(`📦 로딩 중: ${script.url}`)
+      await loadScript(script.url)
+      await new Promise(resolve => setTimeout(resolve, 1000)) // 로드 후 대기
+    }
+  }
+
+  // 스크립트 로드 헬퍼
+  const loadScript = (src: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // 기존 스크립트 확인
+      const existing = document.querySelector(`script[src="${src}"]`)
+      if (existing) {
+        resolve()
+        return
+      }
+
+      const script = document.createElement("script")
+      script.src = src
+      script.async = true
+      script.crossOrigin = "anonymous"
+
+      const cleanup = () => {
+        script.removeEventListener('load', onLoad)
+        script.removeEventListener('error', onError)
+        clearTimeout(timeout)
+      }
+
+      const onLoad = () => {
+        cleanup()
+        console.log(`✅ 스크립트 로드 성공: ${src}`)
+        setTimeout(resolve, 500) // 초기화 시간 확보
+      }
+
+      const onError = () => {
+        cleanup()
+        if (document.head.contains(script)) {
+          document.head.removeChild(script)
+        }
+        reject(new Error(`스크립트 로드 실패: ${src}`))
+      }
+
+      const timeout = setTimeout(() => {
+        cleanup()
+        if (document.head.contains(script)) {
+          document.head.removeChild(script)
+        }
+        reject(new Error(`스크립트 로드 타임아웃: ${src}`))
+      }, 20000) // 20초 타임아웃
+
+      script.addEventListener('load', onLoad)
+      script.addEventListener('error', onError)
+      document.head.appendChild(script)
+    })
+  }
+
+  // MediaPipe 객체 대기
+  const waitForMediaPipeObjects = async () => {
+    console.log("⏳ MediaPipe 객체 초기화 대기 중...")
+    
+    let attempts = 0
+    const maxAttempts = 30
+    
+    while (attempts < maxAttempts) {
+      const objects = {
+        Pose: !!window.Pose,
+        drawConnectors: !!window.drawConnectors, 
+        drawLandmarks: !!window.drawLandmarks,
+        connections: !!(window.POSE_CONNECTIONS || window.POSE_LANDMARKS)
+      }
+      
+      console.log(`확인 ${attempts + 1}/${maxAttempts}:`, objects)
+      
+      if (Object.values(objects).every(Boolean)) {
+        console.log("🎉 모든 MediaPipe 객체 준비 완료!")
+        await new Promise(resolve => setTimeout(resolve, 1500)) // 안정화 대기
+        return
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      attempts++
+    }
+    
+    throw new Error("MediaPipe 객체 초기화 타임아웃")
+  }
+
+  // MediaPipe 초기화 (강화된 에러 핸들링)
   const initializeMediaPipe = async () => {
     try {
-      console.log("Initializing MediaPipe...")
+      console.log("🔧 MediaPipe Pose 인스턴스 생성 중...")
       setIsLoading(true)
-
-      // MediaPipe 객체가 실제로 사용 가능한지 확인
-      if (!window.Pose) {
-        throw new Error("Pose constructor not available")
-      }
-      if (!window.drawConnectors || !window.drawLandmarks) {
-        throw new Error("Drawing utilities not available")
-      }
-      if (!window.POSE_CONNECTIONS) {
-        throw new Error("POSE_CONNECTIONS not available")
-      }
 
       const pose = new window.Pose({
         locateFile: (file: string) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`
         },
       })
 
-      // 설정 최적화 - 인식 정확도 향상
+      console.log("⚙️ MediaPipe 옵션 설정 중...")
       await pose.setOptions({
-        modelComplexity: 1, // 0: Lite, 1: Full, 2: Heavy
+        modelComplexity: 1, // Full 모델 (안정성)
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.5, // 낮춰서 더 잘 감지하도록
-        minTrackingConfidence: 0.3,  // 낮춰서 더 잘 추적하도록
+        minDetectionConfidence: 0.8, // 높은 신뢰도로 시작
+        minTrackingConfidence: 0.7,  // 높은 추적 신뢰도
         staticImageMode: false,
       })
 
-      console.log("MediaPipe options set successfully")
-
+      console.log("📡 결과 핸들러 설정 중...")
       pose.onResults((results: any) => {
         try {
-          console.log("=== MediaPipe Results ===", {
-            timestamp: Date.now(),
-            poseLandmarks: !!results.poseLandmarks,
-            landmarkCount: results.poseLandmarks?.length || 0,
-            canvasRef: !!canvasRef.current,
-            videoRef: !!videoRef.current,
-            showLandmarks: showLandmarks
-          })
+          const hasValidLandmarks = results.poseLandmarks && results.poseLandmarks.length >= 25
           
-          if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-            console.log("✅ LANDMARKS DETECTED!", {
-              count: results.poseLandmarks.length,
-              firstLandmark: results.poseLandmarks[0],
-              showLandmarks: showLandmarks
+          if (hasValidLandmarks) {
+            console.log("🎯 포즈 감지 성공:", {
+              landmarks: results.poseLandmarks.length,
+              nose: results.poseLandmarks[0] ? '✓' : '✗',
+              shoulders: (results.poseLandmarks[11] && results.poseLandmarks[12]) ? '✓' : '✗'
             })
             
-            // 랜드마크가 있으면 그리기 시도
             drawResults(results)
             analyzePosture(results.poseLandmarks)
             setDetectedPoses(1)
             setError(null)
             
-            if (feedbackMessage === "사람이 감지되지 않습니다. 카메라 앞으로 와주세요") {
-              setFeedbackMessage("✅ 사용자가 감지되었습니다!")
+            if (feedbackMessage.includes("감지되지 않습니다")) {
+              setFeedbackMessage("✅ 자세가 감지되었습니다! 운동을 시작하세요")
             }
           } else {
-            console.log("⚠️ No landmarks detected")
             setDetectedPoses(0)
-            if (feedbackMessage !== "사람이 감지되지 않습니다. 카메라 앞으로 와주세요") {
-              setFeedbackMessage("사람이 감지되지 않습니다. 카메라 앞으로 와주세요")
+            if (!feedbackMessage.includes("감지되지 않습니다")) {
+              setFeedbackMessage("사람이 감지되지 않습니다. 전신이 45도 각도에서 보이도록 조정하세요")
             }
           }
         } catch (err) {
-          console.error("❌ Results processing error:", err)
-          setFeedbackMessage("포즈 분석 중 오류가 발생했습니다")
+          console.error("❌ 결과 처리 오류:", err)
         }
       })
 
-      // 에러 핸들링 강화
+      // 에러 핸들링
       pose.onError = (error: any) => {
-        console.error("MediaPipe Pose error:", error)
-        setError("포즈 감지 중 오류가 발생했습니다")
+        console.error("💥 MediaPipe 포즈 에러:", error)
+        setError(`포즈 감지 오류: ${error.message || '알 수 없는 오류'}`)
+        setTimeout(() => fallbackToSimulation(), 2000)
       }
 
-      // pose 초기화 완료까지 대기
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // 초기화 완료 대기
+      console.log("⏳ 초기화 완료 대기...")
+      await new Promise(resolve => setTimeout(resolve, 2000))
+
+      // 최종 검증
+      if (typeof pose.send !== 'function') {
+        throw new Error("Pose.send 메서드를 사용할 수 없습니다")
+      }
 
       setPoseDetector(pose)
       setMediaPipeStatus("ready")
       setUseRealDetection(true)
-      setFeedbackMessage("MediaPipe 준비 완료! 카메라를 시작하세요")
+      setFeedbackMessage("🎉 MediaPipe 준비 완료! 카메라를 시작하여 운동하세요")
       setIsLoading(false)
-      console.log("MediaPipe initialized successfully")
-    } catch (err) {
-      console.error("MediaPipe 초기화 실패:", err)
-      setError(`MediaPipe 초기화에 실패했습니다: ${err.message}`)
+      console.log("🎉 MediaPipe 초기화 완료!")
+
+    } catch (err: any) {
+      console.error("💥 MediaPipe 초기화 실패:", err)
+      setError(`MediaPipe 초기화 실패: ${err.message}`)
       setMediaPipeStatus("error")
-      fallbackToSimulation()
       setIsLoading(false)
+      setTimeout(() => fallbackToSimulation(), 1000)
     }
   }
 
   // 시뮬레이션 모드로 전환
   const fallbackToSimulation = () => {
+    console.log("🔄 시뮬레이션 모드로 전환...")
     setMediaPipeStatus("error")
     setUseRealDetection(false)
-    setFeedbackMessage("시뮬레이션 모드로 실행됩니다")
+    setError(null)
+    setFeedbackMessage("⚠️ 시뮬레이션 모드로 실행됩니다")
   }
 
   // 결과 그리기 - 강화된 디버깅
   const drawResults = (results: any) => {
-    console.log("🎨 drawResults 호출", {
-      hasCanvas: !!canvasRef.current,
-      hasVideo: !!videoRef.current,
-      showLandmarks: showLandmarks,
-      landmarksCount: results.poseLandmarks?.length || 0
-    })
-
-    if (!canvasRef.current || !videoRef.current) {
-      console.log("❌ Canvas or video ref not available")
-      return
-    }
+    if (!canvasRef.current || !videoRef.current || !results.poseLandmarks) return
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
-    if (!ctx) {
-      console.log("❌ Canvas context not available")
-      return
-    }
+    if (!ctx) return
 
-    const videoWidth = videoRef.current.videoWidth
-    const videoHeight = videoRef.current.videoHeight
-    
-    console.log("📹 Video dimensions:", { videoWidth, videoHeight })
-    
-    if (videoWidth === 0 || videoHeight === 0) {
-      console.log("⚠️ Video dimensions not ready")
-      return
-    }
+    const video = videoRef.current
+    if (video.videoWidth === 0 || video.videoHeight === 0) return
 
     // 캔버스 크기 설정
-    const oldWidth = canvas.width
-    const oldHeight = canvas.height
-    canvas.width = videoWidth
-    canvas.height = videoHeight
-    
-    if (oldWidth !== videoWidth || oldHeight !== videoHeight) {
-      console.log("🔄 Canvas resized:", { from: `${oldWidth}x${oldHeight}`, to: `${videoWidth}x${videoHeight}` })
-    }
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
 
     // 캔버스 초기화
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.save()
 
-    // 테스트를 위한 배경 색상
-    ctx.fillStyle = "rgba(255, 0, 0, 0.1)"
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    
-    console.log("🟥 배경 색상 테스트 그리기 완료")
+    if (results.poseLandmarks && showLandmarks) {
+      drawPoseConnections(ctx, results.poseLandmarks)
+      drawPoseLandmarks(ctx, results.poseLandmarks)
 
-    if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-      console.log(`🔴 ${results.poseLandmarks.length}개 랜드마크 그리기 시작`)
-      
-      if (showLandmarks) {
-        console.log("✅ 랜드마크 표시 모드 - 그리기 시작")
-        drawPoseConnections(ctx, results.poseLandmarks)
-        drawPoseLandmarks(ctx, results.poseLandmarks)
-        console.log("✅ 랜드마크 그리기 완료")
-      } else {
-        console.log("🙅 랜드마크 비표시 모드")
-      }
-
-      // 배경 피드백 색상
+      // 올바른 자세일 때 녹색 오버레이
       try {
         const poseResult = validateNeckExercise(results.poseLandmarks)
         if (poseResult.isCorrectPose) {
@@ -334,70 +326,43 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           ctx.fillRect(0, 0, canvas.width, canvas.height)
         }
       } catch (err) {
-        console.error("❌ Error in pose validation:", err)
+        console.error("자세 검증 오류:", err)
       }
-    } else {
-      console.log("⚠️ No pose landmarks to draw")
     }
 
     ctx.restore()
-    console.log("✅ drawResults 완료")
   }
 
   // 포즈 연결선 그리기
   const drawPoseConnections = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
     if (!landmarks || landmarks.length === 0) return
     
-    console.log("Drawing pose connections manually")
-    
-    // MediaPipe 포즈 연결선 정의
     const connections = [
       // 얼굴
-      [0, 1], [1, 2], [2, 3], [3, 7], // 코 -> 오른쪽 얼굴
-      [0, 4], [4, 5], [5, 6], [6, 8], // 코 -> 왼쪽 얼굴
-      
+      [0, 1], [1, 2], [2, 3], [3, 7],
+      [0, 4], [4, 5], [5, 6], [6, 8],
       // 몸통
-      [9, 10], // 입
-      [11, 12], // 어깨 연결
-      [11, 23], [12, 24], // 어깨 -> 엉덩이
-      [23, 24], // 엉덩이 연결
-      
-      // 오른쪽 팔
+      [9, 10], [11, 12], [11, 23], [12, 24], [23, 24],
+      // 팔
       [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
-      
-      // 왼쪽 팔
       [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
-      
-      // 오른쪽 다리
+      // 다리
       [23, 25], [25, 27], [27, 29], [27, 31], [29, 31],
-      
-      // 왼쪽 다리
       [24, 26], [26, 28], [28, 30], [28, 32], [30, 32]
     ]
     
     ctx.strokeStyle = "#00FF41"
-    ctx.lineWidth = 3
+    ctx.lineWidth = 2
     
     connections.forEach(([startIdx, endIdx]) => {
-      const startLandmark = landmarks[startIdx]
-      const endLandmark = landmarks[endIdx]
+      const start = landmarks[startIdx]
+      const end = landmarks[endIdx]
       
-      if (startLandmark && endLandmark) {
-        // visibility 체크
-        const startVisible = !startLandmark.visibility || startLandmark.visibility > 0.3
-        const endVisible = !endLandmark.visibility || endLandmark.visibility > 0.3
-        
-        if (startVisible && endVisible) {
-          const startX = startLandmark.x * ctx.canvas.width
-          const startY = startLandmark.y * ctx.canvas.height
-          const endX = endLandmark.x * ctx.canvas.width
-          const endY = endLandmark.y * ctx.canvas.height
-          
-          ctx.beginPath()
-          ctx.moveTo(startX, startY)
-          ctx.lineTo(endX, endY)
-          ctx.stroke()
-        }
+      if (start && end && (!start.visibility || start.visibility > 0.5) && (!end.visibility || end.visibility > 0.5)) {
+        ctx.beginPath()
+        ctx.moveTo(start.x * ctx.canvas.width, start.y * ctx.canvas.height)
+        ctx.lineTo(end.x * ctx.canvas.width, end.y * ctx.canvas.height)
+        ctx.stroke()
       }
     })
   }
@@ -406,31 +371,23 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const drawPoseLandmarks = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
     if (!landmarks || landmarks.length === 0) return
     
-    console.log("Drawing pose landmarks manually")
-    
     landmarks.forEach((landmark, index) => {
-      // visibility 체크
-      if (landmark.visibility && landmark.visibility < 0.3) return
+      if (landmark.visibility && landmark.visibility < 0.5) return
       
       const x = landmark.x * ctx.canvas.width
       const y = landmark.y * ctx.canvas.height
       
-      // 중요한 포인트는 더 크게
-      const keyPoints = [0, 11, 12, 13, 14, 15, 16, 23, 24] // 코, 어깨, 팔꿈치, 손목, 엉덩이
-      const radius = keyPoints.includes(index) ? 5 : 3
+      const keyPoints = [0, 11, 12, 13, 14, 15, 16, 23, 24]
+      const radius = keyPoints.includes(index) ? 4 : 2
       
-      // 원 그리기
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, 2 * Math.PI)
       ctx.fillStyle = "#FF0000"
       ctx.fill()
-      
-      // 테두리
       ctx.strokeStyle = "#FFFFFF"
-      ctx.lineWidth = 2
+      ctx.lineWidth = 1
       ctx.stroke()
       
-      // 중요한 포인트에 번호 표시 (디버깅용)
       if (keyPoints.includes(index)) {
         ctx.fillStyle = "#FFFFFF"
         ctx.font = "10px Arial"
@@ -440,10 +397,9 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     })
   }
 
-  // 목 운동 검증 (개선된 버전)
+  // 누운 자세 목 운동 검증 (가로 촬영, 45도 각도 최적화)
   const validateNeckExercise = (landmarks: any[]) => {
     if (!landmarks || landmarks.length < 33) {
-      console.log("Invalid landmarks:", { length: landmarks?.length })
       return {
         isCorrectPose: false,
         direction: "center" as const,
@@ -452,17 +408,17 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     }
 
     try {
-      const nose = landmarks[0]           // 코
-      const leftEye = landmarks[2]        // 왼쪽 눈
-      const rightEye = landmarks[5]       // 오른쪽 눈
-      const leftEar = landmarks[7]        // 왼쪽 귀
-      const rightEar = landmarks[8]       // 오른쪽 귀
-      const leftShoulder = landmarks[11]  // 왼쪽 어깨
-      const rightShoulder = landmarks[12] // 오른쪽 어깨
+      const nose = landmarks[0]
+      const leftEye = landmarks[2]
+      const rightEye = landmarks[5]
+      const leftEar = landmarks[7]
+      const rightEar = landmarks[8]
+      const leftShoulder = landmarks[11]
+      const rightShoulder = landmarks[12]
+      const leftHip = landmarks[23]
+      const rightHip = landmarks[24]
 
-      // 필수 랜드마크 검증
       if (!nose || !leftShoulder || !rightShoulder) {
-        console.log("Missing essential landmarks:", { nose: !!nose, leftShoulder: !!leftShoulder, rightShoulder: !!rightShoulder })
         return {
           isCorrectPose: false,
           direction: "center" as const,
@@ -470,70 +426,61 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         }
       }
 
-      // visibility 체크
-      const visibilityThreshold = 0.3
-      if (nose.visibility && nose.visibility < visibilityThreshold) {
-        console.log("Low nose visibility:", nose.visibility)
-        return {
-          isCorrectPose: false,
-          direction: "center" as const,
-          feedback: "얼굴이 명확하게 보이도록 조정하세요",
-        }
-      }
+      // 45도 촬영에서의 몸 중심선 계산
+      const bodyMidlineX = (leftShoulder.x + rightShoulder.x + leftHip.x + rightHip.x) / 4
+      const bodyMidlineY = (leftShoulder.y + rightShoulder.y + leftHip.y + rightHip.y) / 4
 
-      // 어깨 중심점 계산
-      const shoulderCenterX = (leftShoulder.x + rightShoulder.x) / 2
-      const shoulderCenterY = (leftShoulder.y + rightShoulder.y) / 2
-
-      // 머리 중심점 계산 (더 정확한 계산)
+      // 머리 중심점 계산
+      const facialLandmarks = [nose, leftEye, rightEye, leftEar, rightEar].filter(
+        landmark => landmark && (!landmark.visibility || landmark.visibility > 0.3)
+      )
+      
       let headCenterX = nose.x
       let headCenterY = nose.y
       
-      // 눈과 귀를 포함한 머리 중심 계산
-      const facialLandmarks = [nose, leftEye, rightEye, leftEar, rightEar].filter(landmark => landmark && landmark.visibility > 0.3)
-      if (facialLandmarks.length >= 3) {
+      if (facialLandmarks.length >= 2) {
         headCenterX = facialLandmarks.reduce((sum, landmark) => sum + landmark.x, 0) / facialLandmarks.length
         headCenterY = facialLandmarks.reduce((sum, landmark) => sum + landmark.y, 0) / facialLandmarks.length
       }
 
-      const headOffset = headCenterX - shoulderCenterX
-
-      // 방향 감지 (임계값 개선)
+      // 45도 각도에서의 머리 회전 감지
+      const headOffsetX = headCenterX - bodyMidlineX
+      
+      // 방향 감지
       let direction: "center" | "left" | "right" = "center"
-      const threshold = 0.08 // 임계값 증가로 노이즈 감소
+      const threshold = 0.05 // 45도 각도에서 더 민감하게
 
-      if (headOffset > threshold) {
+      if (headOffsetX > threshold) {
         direction = "right"
-      } else if (headOffset < -threshold) {
+      } else if (headOffsetX < -threshold) {
         direction = "left"
       }
 
-      // 누워있는 자세 확인 (어깨 수평도 체크)
-      const shoulderAngle = Math.abs(leftShoulder.y - rightShoulder.y)
-      const isLyingDown = shoulderAngle < 0.15 // 임계값 증가
-
-      // 머리와 어깨의 상대적 위치 확인
-      const headAboveShoulders = headCenterY < shoulderCenterY + 0.15
+      // 누운 자세 확인
+      const shoulderHipAlignment = Math.abs(leftShoulder.y - rightShoulder.y) + Math.abs(leftHip.y - rightHip.y)
+      const isLyingDown = shoulderHipAlignment < 0.2
       
-      // 전체적인 자세 평가
-      const isCorrectPose = isLyingDown && headAboveShoulders
+      const headAboveBody = headCenterY < bodyMidlineY + 0.15
+      const bodyDepth = Math.abs(leftShoulder.x - rightShoulder.x)
+      const hasProperDepth = bodyDepth > 0.12
       
-      console.log("Pose analysis:", {
+      const isCorrectPose = isLyingDown && headAboveBody && hasProperDepth
+      
+      console.log("45도 누운 자세 분석:", {
         direction,
-        headOffset: headOffset.toFixed(3),
-        shoulderAngle: shoulderAngle.toFixed(3),
-        isLyingDown,
-        headAboveShoulders,
+        headOffsetX: headOffsetX.toFixed(3),
+        shoulderHipAlignment: shoulderHipAlignment.toFixed(3),
+        bodyDepth: bodyDepth.toFixed(3),
         isCorrectPose
       })
 
       return {
         isCorrectPose,
         direction,
-        feedback: generateFeedback(direction, exerciseCount, isCorrectPose, isLyingDown),
+        feedback: generateLyingDownFeedback(direction, exerciseCount, isCorrectPose, isLyingDown, hasProperDepth),
       }
     } catch (err) {
-      console.error("Pose validation error:", err)
+      console.error("자세 검증 오류:", err)
       return {
         isCorrectPose: false,
         direction: "center" as const,
@@ -574,37 +521,41 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     setFeedbackMessage(result.feedback)
   }
 
-  // 피드백 메시지 생성 (개선된 버전)
-  const generateFeedback = (
+  // 누운 자세 피드백 메시지 생성 (45도 촬영 최적화)
+  const generateLyingDownFeedback = (
     direction: "center" | "left" | "right",
     count: number,
     isCorrectPose: boolean,
     isLyingDown: boolean,
+    hasProperDepth: boolean,
   ) => {
+    if (!hasProperDepth) {
+      return "카메라를 45도 각도에서 촬영해주세요. 어깨와 몸이 잘 보이도록 📐"
+    }
+
     if (!isLyingDown) {
-      return "편안하게 누워주세요. 어깨가 수평이 되도록 하세요 🛏️"
+      return "편안하게 누워주세요. 수숨슬립 베개를 목 아래 받치고 🛏️"
     }
 
     if (!isCorrectPose) {
-      return "자세를 조정해주세요. 머리가 어깨 위에 오도록 하세요 📏"
+      return "자세를 조정해주세요. 머리와 목이 편안하게 베개에 올려져 있나요? 📏"
     }
 
     if (count >= requiredCount) {
-      return "🎉 운동 완료! 훌륭합니다! 🎆"
+      return "🎉 목 운동 완료! 척추가 시원해졌을 거예요! 🎆"
     }
 
-    const remaining = requiredCount - count
     const progress = Math.round((count / requiredCount) * 100)
 
     switch (direction) {
       case "left":
-        return `👈 왼쪽 목 돌리기 - 좋습니다! (${count}/${requiredCount}회, ${progress}%)`
+        return `👈 왼쪽으로 목 돌리기 - 척추 C1~C7이 풀어지고 있어요! (${count}/${requiredCount}회, ${progress}%)`
       case "right":
-        return `👉 오른쪽 목 돌리기 - 좋습니다! (${count}/${requiredCount}회, ${progress}%)`
+        return `👉 오른쪽으로 목 돌리기 - 경추 마사지 효과! (${count}/${requiredCount}회, ${progress}%)`
       case "center":
-        return `✅ 중앙 자세 - 계속 좌우로 돌려주세요 (${count}/${requiredCount}회, ${progress}%)`
+        return `✅ 중앙 자세 - 숨을 고르며 계속 좌우로 돌려주세요 (${count}/${requiredCount}회, ${progress}%)`
       default:
-        return `목을 좌우로 천천히 돌려주세요 🔄 (${count}/${requiredCount}회, ${progress}%)`
+        return `목을 좌우로 천천히 돌려주세요. 뇌척수액 순환에 도움됩니다 🔄 (${count}/${requiredCount}회, ${progress}%)`
     }
   }
 
@@ -614,36 +565,32 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       setIsLoading(true)
       setError(null)
 
-      // 기존 스트림 정리
       if (stream) {
         stream.getTracks().forEach((track) => track.stop())
       }
 
-      // 카메라 권한 및 사용 가능성 확인
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("이 브라우저는 카메라를 지원하지 않습니다")
       }
 
-      console.log("Requesting camera access...")
+      console.log("📷 카메라 접근 요청...")
 
-      // 카메라 스트림 요청 (설정 최적화)
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 640, min: 320, max: 1280 },
-          height: { ideal: 480, min: 240, max: 720 },
-          facingMode: "user", // 전면 카메라
-          frameRate: { ideal: 20, min: 10, max: 30 }, // 성능 최적화
+          width: { ideal: 1280, min: 640, max: 1920 },
+          height: { ideal: 720, min: 480, max: 1080 },
+          facingMode: "environment", // 후면 카메라 (옆에서 촬영)
+          frameRate: { ideal: 30, min: 15, max: 60 },
         },
         audio: false,
       })
 
-      console.log("Camera stream obtained:", mediaStream.getVideoTracks()[0].getSettings())
+      console.log("✅ 카메라 스트림 획득:", mediaStream.getVideoTracks()[0].getSettings())
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream
         setStream(mediaStream)
 
-        // 비디오 로드 대기
         await new Promise((resolve, reject) => {
           if (!videoRef.current) {
             reject(new Error("Video element not available"))
@@ -651,7 +598,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           }
 
           const video = videoRef.current
-
           const onLoadedData = () => {
             video.removeEventListener("loadeddata", onLoadedData)
             video.removeEventListener("error", onError)
@@ -666,32 +612,30 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
           video.addEventListener("loadeddata", onLoadedData)
           video.addEventListener("error", onError)
-
           video.play().catch(reject)
         })
 
         setIsActive(true)
-        setFeedbackMessage("카메라가 활성화되었습니다! 운동을 시작하세요")
+        setFeedbackMessage("📹 카메라가 활성화되었습니다! 운동을 시작하세요")
 
         // MediaPipe 또는 시뮬레이션 시작
         if (useRealDetection && poseDetector && mediaPipeStatus === "ready") {
-          console.log("Starting MediaPipe pose detection...")
+          console.log("🎯 MediaPipe 포즈 감지 시작...")
           setMediaPipeStatus("running")
-          // 비디오가 완전히 준비될 때까지 잠시 대기
           setTimeout(() => {
             if (isActive && videoRef.current && videoRef.current.readyState >= 2) {
               startPoseDetection()
             }
           }, 1000)
         } else {
-          console.log("Starting simulation mode...")
+          console.log("🎭 시뮬레이션 모드 시작...")
           startSimulation()
         }
       }
 
       setIsLoading(false)
     } catch (err: any) {
-      console.error("카메라 시작 실패:", err)
+      console.error("💥 카메라 시작 실패:", err)
       setIsLoading(false)
 
       let errorMessage = "카메라에 접근할 수 없습니다."
@@ -702,34 +646,28 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         errorMessage = "카메라를 찾을 수 없습니다. 카메라가 연결되어 있는지 확인해주세요."
       } else if (err.name === "NotReadableError") {
         errorMessage = "카메라가 다른 애플리케이션에서 사용 중입니다."
-      } else if (err.name === "OverconstrainedError") {
-        errorMessage = "요청한 카메라 설정을 지원하지 않습니다."
-      } else if (err.message) {
-        errorMessage = err.message
       }
 
       setError(errorMessage)
     }
   }
 
-  // 포즈 감지 시작
+  // 포즈 감지 시작 (최적화된)
   const startPoseDetection = () => {
     let frameCount = 0
     let lastProcessTime = 0
-    const targetFPS = 15 // FPS 제한으로 성능 최적화
+    const targetFPS = 20 // 안정적인 FPS로 조정
     const frameInterval = 1000 / targetFPS
 
-    console.log("Starting pose detection...")
+    console.log("🎯 포즈 감지 루프 시작...")
 
     const detectPose = async () => {
       if (!isActive || !videoRef.current || !poseDetector) {
-        console.log("Detection stopped:", { isActive, hasVideo: !!videoRef.current, hasPoseDetector: !!poseDetector })
         return
       }
 
       const now = performance.now()
       
-      // FPS 제한
       if (now - lastProcessTime < frameInterval) {
         if (isActive) {
           animationFrameRef.current = requestAnimationFrame(detectPose)
@@ -739,7 +677,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       lastProcessTime = now
 
       try {
-        // FPS 계산
         frameCount++
         const currentTime = Date.now()
         if (currentTime - lastFpsTimeRef.current >= 1000) {
@@ -748,32 +685,12 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           lastFpsTimeRef.current = currentTime
         }
 
-        // 비디오 준비 상태 상세 확인
         const video = videoRef.current
-        const isVideoReady = video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA
-        const hasValidDimensions = video.videoWidth > 0 && video.videoHeight > 0
-        const isNotPaused = !video.paused && !video.ended
-        
-        if (isVideoReady && hasValidDimensions && isNotPaused) {
-          console.log("Sending frame to MediaPipe...", {
-            readyState: video.readyState,
-            dimensions: `${video.videoWidth}x${video.videoHeight}`,
-            currentTime: video.currentTime
-          })
-          
+        if (video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA && video.videoWidth > 0 && !video.paused) {
           await poseDetector.send({ image: video })
-        } else {
-          console.log("Video not ready:", {
-            readyState: video.readyState,
-            videoWidth: video.videoWidth,
-            videoHeight: video.videoHeight,
-            paused: video.paused,
-            ended: video.ended
-          })
         }
-      } catch (err) {
-        console.error("포즈 감지 오류:", err)
-        // 에러 카운터 추가
+      } catch (err: any) {
+        console.error("💥 포즈 감지 오류:", err)
         if (err.message && err.message.includes("send")) {
           setError("카메라 연결에 문제가 있습니다. 잠시 후 다시 시도해주세요.")
         }
@@ -784,7 +701,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       }
     }
 
-    // 초기 시작 전 짧은 대기 시간
     setTimeout(() => {
       if (isActive) {
         detectPose()
@@ -802,7 +718,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       setCurrentDirection(currentDir)
 
       if (phase === 2) {
-        // center로 돌아왔을 때
         setExerciseCount((prev) => {
           const newCount = prev + 1
           const progress = (newCount / requiredCount) * 100
@@ -839,7 +754,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       videoRef.current.srcObject = null
     }
 
-    // 정리
     if (simulationIntervalRef.current) {
       clearInterval(simulationIntervalRef.current)
       simulationIntervalRef.current = null
@@ -849,7 +763,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       cancelAnimationFrame(animationFrameRef.current)
     }
 
-    // 상태 초기화
     setExerciseCount(0)
     setExerciseProgress(0)
     setFeedbackMessage("카메라가 중지되었습니다")
@@ -865,7 +778,6 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     setLastDirection("center")
     setFeedbackMessage("운동을 다시 시작합니다")
 
-    // 재시작
     if (isActive) {
       if (useRealDetection && poseDetector) {
         // MediaPipe는 이미 실행 중이므로 카운터만 리셋
@@ -891,7 +803,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     }
   }
 
-  // 상태 색상
+  // 상태 표시 헬퍼
   const getStatusColor = () => {
     if (!isActive) return "bg-gray-400"
     if (useRealDetection && mediaPipeStatus === "running") return "bg-green-500"
@@ -901,9 +813,9 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
   const getStatusText = () => {
     if (!isActive) return "대기중"
-    if (useRealDetection && mediaPipeStatus === "running") return "실제감지"
+    if (useRealDetection && mediaPipeStatus === "running") return "AI감지"
     if (mediaPipeStatus === "error") return "시뮬레이션"
-    return "로딩중"
+    return "준비중"
   }
 
   // 에러 표시
@@ -918,6 +830,8 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
             <Button
               onClick={() => {
                 setError(null)
+                loadAttemptRef.current = 0
+                loadMediaPipe()
                 startCamera()
               }}
               className="w-full"
@@ -933,13 +847,16 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     )
   }
 
-  if (isLoading && mediaPipeStatus === "loading") {
+  // 로딩 표시
+  if (isLoading && (mediaPipeStatus === "loading" || loadAttemptRef.current > 0)) {
     return (
       <div className="flex items-center justify-center h-96 bg-gray-100 rounded-lg">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">MediaPipe 라이브러리 로딩 중...</p>
-          <p className="text-sm text-gray-500 mt-2">잠시만 기다려주세요.</p>
+          <p className="text-gray-600 font-medium">MediaPipe 라이브러리 로딩 중...</p>
+          <p className="text-sm text-gray-500 mt-2">
+            시도 {loadAttemptRef.current}/2 - 잠시만 기다려주세요
+          </p>
         </div>
       </div>
     )
@@ -957,7 +874,9 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
               ) : (
                 <WifiOff className="w-4 h-4 text-yellow-600" />
               )}
-              <span className="text-sm font-medium">{useRealDetection ? "실제 포즈 감지 모드" : "시뮬레이션 모드"}</span>
+              <span className="text-sm font-medium">
+                {useRealDetection ? "AI 포즈 감지 모드" : "시뮬레이션 모드"}
+              </span>
             </div>
             <Button
               variant="outline"
@@ -966,12 +885,13 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
                 if (useRealDetection) {
                   fallbackToSimulation()
                 } else {
+                  loadAttemptRef.current = 0
                   loadMediaPipe()
                 }
               }}
               className="h-6 px-2 text-xs"
             >
-              {useRealDetection ? "시뮬레이션으로" : "실제감지 시도"}
+              {useRealDetection ? "시뮬레이션으로" : "AI감지 재시도"}
             </Button>
           </div>
         </div>
@@ -1044,17 +964,14 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           </div>
         </div>
 
-        {/* 랜드마크 토글 - 전체화면 대응 */}
+        {/* 랜드마크 토글 */}
         <div className={`absolute z-30 ${
           isActive ? 'top-6 right-4' : 'top-2 right-2'
         }`}>
           <Button
             variant="ghost"
             size={isActive ? "default" : "sm"}
-            onClick={() => {
-              console.log("Toggling landmarks:", !showLandmarks)
-              setShowLandmarks(!showLandmarks)
-            }}
+            onClick={() => setShowLandmarks(!showLandmarks)}
             className={`text-white hover:bg-opacity-70 backdrop-blur-sm ${
               isActive ? 'h-12 px-4' : 'h-8 px-2'
             } ${
@@ -1074,8 +991,8 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
               <div className="font-mono space-y-1">
                 <div>FPS: <span className="text-green-400">{fps}</span></div>
                 <div>인식: <span className={detectedPoses > 0 ? 'text-green-400' : 'text-red-400'}>{detectedPoses > 0 ? '성공' : '실패'}</span></div>
-                <div>랜드마크: <span className={showLandmarks ? 'text-blue-400' : 'text-gray-400'}>{showLandmarks ? 'ON' : 'OFF'}</span></div>
-                <div>MediaPipe: <span className="text-yellow-400">{mediaPipeStatus}</span></div>
+                <div>모드: <span className="text-yellow-400">{useRealDetection ? 'AI' : '시뮬레이션'}</span></div>
+                <div>상태: <span className="text-blue-400">{mediaPipeStatus}</span></div>
               </div>
             </div>
           </div>
@@ -1186,7 +1103,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           <p>• 🔄 <strong>운동 방법:</strong> 목을 좌우로 천천히 20회 돌려주세요</p>
           <p>• 🫁 <strong>호흡:</strong> 들숨에 좌우로, 날숨에 중앙으로 돌아오세요</p>
           {useRealDetection ? (
-            <p className="text-green-600">• ✅ 실제 MediaPipe 포즈 감지가 활성화되었습니다!</p>
+            <p className="text-green-600">• ✅ AI 포즈 감지가 활성화되었습니다!</p>
           ) : (
             <p className="text-yellow-600">• ⚠️ 현재 시뮬레이션 모드로 실행 중입니다</p>
           )}
