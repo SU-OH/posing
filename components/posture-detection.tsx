@@ -56,6 +56,8 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const lastFpsTimeRef = useRef(Date.now())
   const loadAttemptRef = useRef(0)
   const cameraStartingRef = useRef(false) // 카메라 시작 중복 방지
+  const retryInProgressRef = useRef(false) // 재시도 중복 방지
+  const lastCameraAttemptRef = useRef(0) // 마지막 카메라 시도 시간
 
   useEffect(() => {
     // 개발/테스트 모드에서는 바로 시뮬레이션으로 시작할 수 있도록
@@ -629,17 +631,49 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
   // 카메라 시작 (중복 호출 방지)
   const startCamera = async () => {
-    // 중복 실행 방지 - ref를 사용해서 즉시 체크
-    if (cameraStartingRef.current || isLoading || isActive) {
-      console.warn("⚠️ 카메라가 이미 실행 중입니다. 중복 호출을 방지합니다.", {
+    // 쿨다운 기간 체크 (5초 간격으로 제한)
+    const now = Date.now()
+    const cooldownPeriod = 5000 // 5초
+    
+    if (now - lastCameraAttemptRef.current < cooldownPeriod) {
+      const remaining = Math.ceil((cooldownPeriod - (now - lastCameraAttemptRef.current)) / 1000)
+      console.warn(`⏰ 카메라 시작 쿨다운 중입니다. ${remaining}초 후 다시 시도하세요.`)
+      setFeedbackMessage(`카메라 준비 중... ${remaining}초 후 다시 시도하세요`)
+      return
+    }
+
+    // 더 강력한 중복 실행 방지 체크
+    if (cameraStartingRef.current || isLoading || isActive || stream) {
+      console.warn("⚠️ 카메라가 이미 실행 중이거나 준비 중입니다. 중복 호출을 방지합니다.", {
         cameraStarting: cameraStartingRef.current,
         isLoading,
-        isActive
+        isActive,
+        hasStream: !!stream,
+        mediaPipeStatus,
+        caller: new Error().stack?.split('\n')[2]?.trim() // 호출자 추적
       })
       return
     }
 
+    // MediaPipe가 준비되지 않았으면 대기
+    if (mediaPipeStatus !== "ready") {
+      console.warn("⚠️ MediaPipe가 아직 준비되지 않았습니다. 현재 상태:", mediaPipeStatus)
+      setFeedbackMessage("MediaPipe 준비 중... 잠시만 기다려주세요")
+      return
+    }
+
+    lastCameraAttemptRef.current = now // 마지막 시도 시간 기록
+    console.log("📷 카메라 시작 요청 승인됨. 호출자:", new Error().stack?.split('\n')[2]?.trim())
     cameraStartingRef.current = true // 시작 플래그 설정
+
+    // 워치독 타이머: 30초 후 자동으로 플래그 해제
+    const watchdogTimer = setTimeout(() => {
+      if (cameraStartingRef.current) {
+        console.error("🚨 워치독: 카메라 시작이 30초를 초과했습니다. 플래그를 강제 해제합니다.")
+        cameraStartingRef.current = false
+        setIsLoading(false)
+      }
+    }, 30000)
 
     try {
       console.log("📷 카메라 시작 요청...")
@@ -727,10 +761,12 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
       setIsLoading(false)
       cameraStartingRef.current = false // 성공 시 플래그 해제
+      clearTimeout(watchdogTimer) // 워치독 타이머 해제
     } catch (err: any) {
       console.error("💥 카메라 시작 실패:", err)
       setIsLoading(false)
       cameraStartingRef.current = false // 에러 시 플래그 해제
+      clearTimeout(watchdogTimer) // 워치독 타이머 해제
 
       let errorMessage = "카메라에 접근할 수 없습니다."
 
@@ -937,15 +973,37 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           <p className="text-red-600 mb-4 text-sm leading-relaxed">{error}</p>
           <div className="space-y-2">
             <Button
-              onClick={() => {
-                setError(null)
-                loadAttemptRef.current = 0
-                loadMediaPipe()
-                startCamera()
+              onClick={async () => {
+                if (retryInProgressRef.current) {
+                  console.warn("⚠️ 재시도가 이미 진행 중입니다.")
+                  return
+                }
+                retryInProgressRef.current = true
+                try {
+                  setError(null)
+                  loadAttemptRef.current = 0
+                  
+                  // MediaPipe를 먼저 로드하고 완료된 후에 카메라 시작
+                  console.log("🔄 재시도: MediaPipe 로딩 시작...")
+                  await loadMediaPipe()
+                  
+                  // MediaPipe가 ready 상태가 되었는지 확인
+                  if (mediaPipeStatus === "ready") {
+                    console.log("🎯 재시도: MediaPipe 준비 완료, 카메라 시작...")
+                    await startCamera()
+                  } else {
+                    console.warn("⚠️ 재시도: MediaPipe가 준비되지 않음, 상태:", mediaPipeStatus)
+                  }
+                } catch (err) {
+                  console.error("💥 재시도 중 오류:", err)
+                } finally {
+                  retryInProgressRef.current = false
+                }
               }}
               className="w-full"
+              disabled={retryInProgressRef.current}
             >
-              다시 시도
+              {retryInProgressRef.current ? "재시도 중..." : "다시 시도"}
             </Button>
             <Button variant="outline" onClick={() => setError(null)} className="w-full">
               취소
