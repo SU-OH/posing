@@ -58,8 +58,18 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
   const cameraStartingRef = useRef(false) // 카메라 시작 중복 방지
   const retryInProgressRef = useRef(false) // 재시도 중복 방지
   const lastCameraAttemptRef = useRef(0) // 마지막 카메라 시도 시간
+  const cameraSuccessRef = useRef(false) // 카메라 성공 완료 플래그
+  const componentMountedRef = useRef(false) // 컴포넌트 마운트 추적
 
   useEffect(() => {
+    // React Strict Mode에서 이중 실행 방지
+    if (componentMountedRef.current) {
+      console.log("⚠️ 컴포넌트가 이미 마운트됨 - 중복 초기화 방지")
+      return cleanup
+    }
+    
+    componentMountedRef.current = true
+    console.log("🚀 컴포넌트 초기화 시작...")
     // 개발/테스트 모드에서는 바로 시뮬레이션으로 시작할 수 있도록
     const forceSimulation = new URLSearchParams(window.location.search).get('simulation') === 'true'
     
@@ -642,16 +652,18 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       return
     }
 
-    // 더 강력한 중복 실행 방지 체크
-    if (cameraStartingRef.current || isLoading || isActive || stream) {
-      console.warn("⚠️ 카메라가 이미 실행 중이거나 준비 중입니다. 중복 호출을 방지합니다.", {
+    // 중복 실행 방지 체크 (덜 엄격하게)
+    if (cameraStartingRef.current) {
+      console.warn("⚠️ 카메라가 이미 시작 중입니다.", {
         cameraStarting: cameraStartingRef.current,
-        isLoading,
-        isActive,
-        hasStream: !!stream,
-        mediaPipeStatus,
-        caller: new Error().stack?.split('\n')[2]?.trim() // 호출자 추적
+        caller: new Error().stack?.split('\n')[2]?.trim()
       })
+      return
+    }
+
+    // 이미 활성화된 경우에만 차단
+    if (isActive && stream) {
+      console.warn("⚠️ 카메라가 이미 활성화되어 있습니다.")
       return
     }
 
@@ -734,11 +746,43 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         })
 
         console.log("🎬 비디오 스트림 준비 완료")
+        
+        console.log("✅ 카메라 활성화 완료")
+        
+        // 상태 업데이트를 더 확실하게 처리
         setIsActive(true)
+        setIsLoading(false)
         setFeedbackMessage("📹 카메라가 활성화되었습니다! 운동을 시작하세요")
+        
+        // 플래그들은 상태 업데이트 후에 처리
+        setTimeout(() => {
+          cameraStartingRef.current = false // 플래그 해제
+          cameraSuccessRef.current = true // 성공 플래그 설정
+          clearTimeout(watchdogTimer) // 워치독 타이머 해제
+          console.log("✅ 상태 플래그 해제 및 성공 플래그 설정 완료")
+        }, 100)
+        
+        // 상태 업데이트가 완료되었는지 확인
+        setTimeout(() => {
+          console.log("📊 상태 확인:", { 
+            isActive, 
+            isLoading, 
+            hasStream: !!stream,
+            cameraSuccess: cameraSuccessRef.current,
+            videoDisplay: videoRef.current?.style.display
+          })
+        }, 100)
 
         // MediaPipe 또는 시뮬레이션 시작 (상태 변경 후 지연)
         setTimeout(() => {
+          console.log("🎬 검지 시작 준비:", {
+            useRealDetection,
+            hasPoseDetector: !!poseDetector,
+            mediaPipeStatus,
+            isActive,
+            hasStream: !!mediaStream
+          })
+          
           if (useRealDetection && poseDetector && mediaPipeStatus === "ready") {
             console.log("🎯 MediaPipe 포즈 감지 시작...")
             setMediaPipeStatus("running")
@@ -756,12 +800,10 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
             console.log("🎭 시뮬레이션 모드 시작...")
             startSimulation()
           }
-        }, 500) // 상태 변경 반영 대기
+        }, 200) // 상태 변경 반영 대기 시간 단축
       }
 
-      setIsLoading(false)
-      cameraStartingRef.current = false // 성공 시 플래그 해제
-      clearTimeout(watchdogTimer) // 워치독 타이머 해제
+      // 플래그는 이미 위에서 해제됨
     } catch (err: any) {
       console.error("💥 카메라 시작 실패:", err)
       setIsLoading(false)
@@ -876,6 +918,7 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     
     // 중복 방지 플래그도 초기화
     cameraStartingRef.current = false
+    cameraSuccessRef.current = false // 성공 플래그 재설정
     setIsActive(false)
     setMediaPipeStatus("ready")
 
@@ -937,6 +980,14 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
 
   // 정리 함수
   const cleanup = () => {
+    console.log("🧹 컴포넌트 정리 시작...")
+    
+    // 모든 플래그 재설정
+    cameraStartingRef.current = false
+    cameraSuccessRef.current = false
+    retryInProgressRef.current = false
+    componentMountedRef.current = false
+    
     if (stream) {
       stream.getTracks().forEach((track) => track.stop())
     }
@@ -946,6 +997,8 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     if (simulationIntervalRef.current) {
       clearInterval(simulationIntervalRef.current)
     }
+    
+    console.log("✅ 컴포넌트 정리 완료")
   }
 
   // 상태 표시 헬퍼
@@ -1104,11 +1157,12 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       }`}>
         <video
           ref={videoRef}
-          className="absolute top-0 left-0 w-full h-full object-cover transform scale-x-[-1]"
+          className={`absolute top-0 left-0 w-full h-full object-cover transform scale-x-[-1] ${
+            isActive ? "block" : "hidden"
+          }`}
           playsInline
           muted
           autoPlay
-          style={{ display: isActive ? "block" : "none" }}
         />
         <canvas
           ref={canvasRef}
@@ -1254,9 +1308,24 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
       {/* 컨트롤 버튼 - 비활성화 상태에서만 */}
       {!isActive && (
         <div className="flex space-x-3">
-          <Button onClick={startCamera} className="flex-1" disabled={isLoading}>
+          <Button 
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log("🎯 카메라 시작 버튼 클릭됨", {
+                isActive,
+                isLoading,
+                cameraStarting: cameraStartingRef.current,
+                mediaPipeStatus,
+                useRealDetection
+              })
+              startCamera()
+            }} 
+            className="flex-1" 
+            disabled={isLoading || cameraStartingRef.current}
+          >
             <Camera className="w-4 h-4 mr-2" />
-            {isLoading ? "시작 중..." : "카메라 시작"}
+            {isLoading ? "시작 중..." : cameraStartingRef.current ? "시작 중..." : "카메라 시작하기"}
           </Button>
         </div>
       )}
