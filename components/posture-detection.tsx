@@ -678,14 +678,14 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     console.log("📷 카메라 시작 요청 승인됨. 호출자:", new Error().stack?.split('\n')[2]?.trim())
     cameraStartingRef.current = true // 시작 플래그 설정
 
-    // 워치독 타이머: 30초 후 자동으로 플래그 해제
+    // 워치독 타이머: 15초 후 자동으로 플래그 해제 (시간 단축)
     const watchdogTimer = setTimeout(() => {
-      if (cameraStartingRef.current) {
-        console.error("🚨 워치독: 카메라 시작이 30초를 초과했습니다. 플래그를 강제 해제합니다.")
+      if (cameraStartingRef.current && !isActive) {
+        console.error("🚨 워치독: 카메라 시작이 15초를 초과했습니다. 플래그를 강제 해제합니다.")
         cameraStartingRef.current = false
         setIsLoading(false)
       }
-    }, 30000)
+    }, 15000)
 
     try {
       console.log("📷 카메라 시작 요청...")
@@ -754,13 +754,11 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
         setIsLoading(false)
         setFeedbackMessage("📹 카메라가 활성화되었습니다! 운동을 시작하세요")
         
-        // 플래그들은 상태 업데이트 후에 처리
-        setTimeout(() => {
-          cameraStartingRef.current = false // 플래그 해제
-          cameraSuccessRef.current = true // 성공 플래그 설정
-          clearTimeout(watchdogTimer) // 워치독 타이머 해제
-          console.log("✅ 상태 플래그 해제 및 성공 플래그 설정 완료")
-        }, 100)
+        // 플래그들은 즉시 처리 (워치독 타이머 먼저 해제)
+        clearTimeout(watchdogTimer) // 워치독 타이머 즉시 해제
+        cameraStartingRef.current = false // 플래그 해제
+        cameraSuccessRef.current = true // 성공 플래그 설정
+        console.log("✅ 상태 플래그 해제 및 성공 플래그 설정 완료")
         
         // 상태 업데이트가 완료되었는지 확인
         setTimeout(() => {
@@ -773,8 +771,8 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
           })
         }, 100)
 
-        // MediaPipe 또는 시뮬레이션 시작 (상태 변경 후 지연)
-        setTimeout(() => {
+        // MediaPipe 또는 시뮬레이션 시작 (상태 변경 후 즉시)
+        requestAnimationFrame(() => {
           console.log("🎬 검지 시작 준비:", {
             useRealDetection,
             hasPoseDetector: !!poseDetector,
@@ -795,12 +793,12 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
                 console.warn("⚠️ 비디오가 아직 준비되지 않음, 시뮬레이션 모드로 전환")
                 startSimulation()
               }
-            }, 1500) // 비디오 준비 대기 시간 증가
+            }, 1000) // 비디오 준비 대기 시간 조정
           } else {
             console.log("🎭 시뮬레이션 모드 시작...")
             startSimulation()
           }
-        }, 200) // 상태 변경 반영 대기 시간 단축
+        })
       }
 
       // 플래그는 이미 위에서 해제됨
@@ -920,7 +918,14 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     cameraStartingRef.current = false
     cameraSuccessRef.current = false // 성공 플래그 재설정
     setIsActive(false)
-    setMediaPipeStatus("ready")
+    setIsLoading(false) // 로딩 상태도 해제
+    
+    // MediaPipe 상태는 useRealDetection에 따라 설정
+    if (useRealDetection) {
+      setMediaPipeStatus("ready")
+    } else {
+      setMediaPipeStatus("error") // 시뮬레이션 모드 유지
+    }
 
     if (stream) {
       console.log("🎬 스트림 트랙 중지...")
@@ -1067,15 +1072,15 @@ export default function PostureDetection({ onDetectionComplete, targetPose, step
     )
   }
 
-  // 로딩 표시
-  if (isLoading && (mediaPipeStatus === "loading" || loadAttemptRef.current > 0)) {
+  // 로딩 표시 (MediaPipe 초기 로딩시에만)
+  if (isLoading && mediaPipeStatus === "loading" && !isActive) {
     return (
       <div className="flex items-center justify-center h-96 bg-gray-100 rounded-lg">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600 font-medium">MediaPipe 라이브러리 로딩 중...</p>
           <p className="text-sm text-gray-500 mt-2">
-            시도 {loadAttemptRef.current}/2 - 잠시만 기다려주세요
+            시도 {loadAttemptRef.current}/3 - 잠시만 기다려주세요
           </p>
         </div>
       </div>
